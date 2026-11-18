@@ -1,14 +1,12 @@
-# Encontros Tech — manifestos Kubernetes da homologação (TRD, ADRs 002-010).
+# Encontros Tech — manifestos Kubernetes da homologação (TRD, ADRs 002-014).
 #
-# Antes do primeiro deploy, crie o namespace e o Secret à mão (o Secret nunca entra no repositório):
-#   kubectl create namespace encontros-tech
-#   kubectl -n encontros-tech create secret generic encontros-tech-secrets \
-#     --from-literal=DATABASE_URL="$(terraform -chdir=terraform output -raw database_url)"
+# O deploy é feito pelo workflow CD (.github/workflows/cd.yml) a cada CI verde na main:
+# ele cria o namespace, cria/atualiza o Secret encontros-tech-secrets a partir do secret
+# DATABASE_URL do GitHub e aplica este arquivo com a versão v<run_number> da CI — trocada só
+# na cópia do runner, sem commit (ADR 013). Por isso a versão escrita aqui não é a que está rodando.
 #
-# Aplicar:  kubectl apply -f k8s/encontros-tech.yaml
-#
-# Nova versão: publique a próxima tag vN no Docker Hub (tag publicada nunca é sobrescrita) e troque,
-# neste arquivo, a tag da imagem, o SERVICE_VERSION e a label app.kubernetes.io/version; depois aplique.
+# Redeploy de uma versão: Actions → CD → Run workflow (input version, ex.: v42).
+# Um "kubectl apply -f" manual deste arquivo volta o cluster para a versão escrita nele.
 ---
 apiVersion: v1
 kind: Namespace
