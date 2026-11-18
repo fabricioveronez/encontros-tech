@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: encontros-tech
+  namespace: encontros-tech
+  labels:
+    app.kubernetes.io/name: encontros-tech
+    app.kubernetes.io/component: service
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: encontros-tech
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: encontros-tech-config
+  namespace: encontros-tech
+  labels:
+    app.kubernetes.io/name: encontros-tech
+    app.kubernetes.io/component: config
+data:
+  APP_TITLE: "Encontros Tech"
+  DEBUG: "false"
+  LOG_LEVEL: "INFO"
+  LOG_FORMAT: "text"
+  SERVICE_NAME: "encontros-tech"
+  SERVICE_VERSION: "v1"

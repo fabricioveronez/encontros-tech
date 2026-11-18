@@ -1,0 +1,157 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[1-9]*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
+      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Validate tag and Kubernetes manifests
+        shell: bash
+        run: |
+          if [[ ! "$TAG" =~ ^v[1-9][0-9]*$ ]]; then
+            echo "Release tag '$TAG' is invalid; expected vN (for example v1 or v12)." >&2
+            exit 1
+          fi
+
+          if [[ -z "$DOCKERHUB_USERNAME" ]]; then
+            echo "Configure the DOCKERHUB_USERNAME repository variable before releasing." >&2
+            exit 1
+          fi
+
+          expected_image="${DOCKERHUB_USERNAME}/encontros-tech:${TAG}"
+          if ! grep -Fqx "          image: ${expected_image}" infra/k8s/deployment.yaml; then
+            echo "infra/k8s/deployment.yaml must reference image '${expected_image}'." >&2
+            exit 1
+          fi
+
+          if ! grep -Fqx "  SERVICE_VERSION: \"${TAG}\"" infra/k8s/configmap.yaml; then
+            echo "infra/k8s/configmap.yaml must set SERVICE_VERSION to '${TAG}'." >&2
+            exit 1
+          fi
+
+  ci:
+    name: Run CI
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Publish Docker image
+    needs:
+      - validate
+      - ci
+    runs-on: ubuntu-latest
+    outputs:
+      already_published: ${{ steps.check_tag.outputs.already_published }}
+    env:
+      TAG: ${{ github.ref_name }}
+      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Check whether the image tag already exists
+        id: check_tag
+        shell: bash
+        run: |
+          status="$(curl --silent --show-error --location \
+            --output /dev/null --write-out '%{http_code}' \
+            "https://hub.docker.com/v2/repositories/${DOCKERHUB_USERNAME}/encontros-tech/tags/${TAG}")" || {
+              echo "Could not query Docker Hub for ${DOCKERHUB_USERNAME}/encontros-tech:${TAG}." >&2
+              exit 1
+            }
+
+          case "$status" in
+            200)
+              echo "Image tag ${DOCKERHUB_USERNAME}/encontros-tech:${TAG} already exists; it will not be overwritten."
+              echo "already_published=true" >> "$GITHUB_OUTPUT"
+              ;;
+            404)
+              echo "Image tag is not published yet; it will be built and pushed."
+              echo "already_published=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Docker Hub returned HTTP ${status}; refusing to publish without confirming tag availability." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Set up Docker Buildx
+        if: steps.check_tag.outputs.already_published == 'false'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Expose GitHub Actions cache runtime
+        if: steps.check_tag.outputs.already_published == 'false'
+        uses: crazy-max/ghaction-github-runtime@v3
+
+      - name: Log in to Docker Hub
+        if: steps.check_tag.outputs.already_published == 'false'
+        uses: docker/login-action@v4
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push image with Bake
+        if: steps.check_tag.outputs.already_published == 'false'
+        env:
+          DOCKERHUB_USER: ${{ vars.DOCKERHUB_USERNAME }}
+          TAG: ${{ github.ref_name }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: >-
+          docker buildx bake -f docker-bake.hcl --push
+          --set app.cache-from=type=gha,scope=release
+          --set app.cache-to=type=gha,scope=release,mode=max
+          app
+
+  deploy:
+    name: Deploy to DOKS
+    needs:
+      - validate
+      - ci
+      - publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install doctl and authenticate
+        uses: digitalocean/action-doctl@v2.5.2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Save DOKS kubeconfig
+        env:
+          DOKS_CLUSTER_NAME: ${{ vars.DOKS_CLUSTER_NAME || 'encontros-tech-cluster' }}
+        run: doctl kubernetes cluster kubeconfig save "$DOKS_CLUSTER_NAME"
+
+      - name: Verify the application Secret exists
+        shell: bash
+        run: |
+          if ! secret_result="$(kubectl get secret encontros-tech-secret \
+            --namespace encuentros-tech --output name 2>&1)"; then
+            echo "Required Secret 'encontros-tech-secret' is missing or inaccessible in namespace 'encontros-tech'. Create it before releasing. Details: ${secret_result}" >&2
+            exit 1
+          fi
+
+      - name: Apply Kubernetes manifests
+        run: kubectl apply -f infra/k8s/
+
+      - name: Wait for deployment rollout
+        run: kubectl rollout status deployment/encontros-tech --namespace encuentros-tech --timeout=5m
