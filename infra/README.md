@@ -49,7 +49,7 @@ Este diretório contém a infraestrutura necessária para o ambiente de homologa
 
 ## CI/CD com GitHub Actions
 
-Os workflows em `.github/workflows/` executam testes, lint do Dockerfile e build da imagem em pull requests e em pushes para `main`. Uma publicação é iniciada ao enviar uma tag Git no formato `vN` (por exemplo, `v2`); após validar os manifests, o workflow publica a imagem no Docker Hub e aplica os manifests ao cluster DOKS.
+O CI executa `pytest` como primeira etapa obrigatória; o lint do Dockerfile e o build da imagem só começam se os testes passarem. Pushes para branches `feature/*`, `fix/*` e `docs/*` executam o CI e, após sucesso de todas as etapas, abrem automaticamente um pull request para `main`. O deploy na DOKS ocorre após o merge: o workflow valida os manifests, publica a imagem no Docker Hub se a tag ainda não existir e aplica os manifests ao cluster. Releases por tag Git `vN` continuam disponíveis.
 
 Configure em **Settings → Secrets and variables → Actions**:
 
@@ -60,11 +60,15 @@ Configure em **Settings → Secrets and variables → Actions**:
 | Secret | `DOCKERHUB_TOKEN` | API token do Docker Hub com permissão **Read & Write**. |
 | Secret | `DIGITALOCEAN_ACCESS_TOKEN` | Token de API da DigitalOcean com acesso ao cluster DOKS. |
 
-Antes de criar uma tag de release, atualize `image` em `infra/k8s/deployment.yaml` para `<DOCKERHUB_USERNAME>/encontros-tech:vN` e `SERVICE_VERSION` em `infra/k8s/configmap.yaml` para a mesma versão. Faça commit dessas alterações e então crie e envie a tag correspondente:
+Em **Settings → Actions → General → Workflow permissions**, permita que GitHub Actions crie pull requests. Configure também a proteção da branch `main` para exigir pull requests e o check obrigatório `Tests` antes do merge; sem essa regra, o GitHub não impede o merge quando o CI falha.
+
+Antes de abrir o pull request, atualize `image` em `infra/k8s/deployment.yaml` para `<DOCKERHUB_USERNAME>/encontros-tech:vN` e `SERVICE_VERSION` em `infra/k8s/configmap.yaml` para a mesma versão. O workflow de merge usa a versão dos manifests; se a tag da imagem já existir, não a sobrescreve e registra um aviso, portanto incremente a versão para publicar as alterações de código.
+
+Para uma release por tag, atualize os mesmos manifests, faça commit e crie e envie a tag correspondente:
 
 ```bash
 git tag v2
 git push origin v2
 ```
 
-O workflow exige que os dois manifests já indiquem a tag enviada. Tags publicadas anteriormente no Docker Hub nunca são sobrescritas; em uma nova execução da mesma release, o workflow reutiliza a imagem existente e continua com o deploy. O Secret `encontros-tech-secret` com a `DATABASE_URL` deve existir previamente no namespace `encontros-tech`; o workflow verifica sua existência e falha com uma mensagem explícita se estiver ausente. Após a aplicação dos manifests, o workflow aguarda a conclusão do rollout.
+O workflow exige que os dois manifests indiquem a mesma versão da tag enviada. Tags publicadas anteriormente no Docker Hub nunca são sobrescritas; em uma nova execução da mesma release, o workflow reutiliza a imagem existente e continua com o deploy. O Secret `encontros-tech-secret` com a `DATABASE_URL` deve existir previamente no namespace `encontros-tech`; o workflow verifica sua existência e falha com uma mensagem explícita se estiver ausente. Após a aplicação dos manifests, o workflow aguarda a conclusão do rollout.

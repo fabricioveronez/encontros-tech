@@ -2,6 +2,8 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v[1-9]*'
 
@@ -16,36 +18,52 @@ jobs:
   validate:
     name: Validate release
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.validate.outputs.tag }}
     env:
-      TAG: ${{ github.ref_name }}
       DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
 
       - name: Validate tag and Kubernetes manifests
+        id: validate
         shell: bash
         run: |
-          if [[ ! "$TAG" =~ ^v[1-9][0-9]*$ ]]; then
-            echo "Release tag '$TAG' is invalid; expected vN (for example v1 or v12)." >&2
-            exit 1
-          fi
-
           if [[ -z "$DOCKERHUB_USERNAME" ]]; then
             echo "Configure the DOCKERHUB_USERNAME repository variable before releasing." >&2
             exit 1
           fi
 
-          expected_image="${DOCKERHUB_USERNAME}/encontros-tech:${TAG}"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            release_tag="$GITHUB_REF_NAME"
+          else
+            image="$(sed -n 's/^          image: //p' infra/k8s/deployment.yaml)"
+            expected_prefix="${DOCKERHUB_USERNAME}/encontros-tech:"
+            if [[ "$image" != "$expected_prefix"* ]]; then
+              echo "infra/k8s/deployment.yaml must reference an image under '${expected_prefix}'." >&2
+              exit 1
+            fi
+            release_tag="${image##*:}"
+          fi
+
+          if [[ ! "$release_tag" =~ ^v[1-9][0-9]*$ ]]; then
+            echo "Release version '$release_tag' is invalid; expected vN (for example v1 or v12)." >&2
+            exit 1
+          fi
+
+          expected_image="${DOCKERHUB_USERNAME}/encontros-tech:${release_tag}"
           if ! grep -Fqx "          image: ${expected_image}" infra/k8s/deployment.yaml; then
             echo "infra/k8s/deployment.yaml must reference image '${expected_image}'." >&2
             exit 1
           fi
 
-          if ! grep -Fqx "  SERVICE_VERSION: \"${TAG}\"" infra/k8s/configmap.yaml; then
-            echo "infra/k8s/configmap.yaml must set SERVICE_VERSION to '${TAG}'." >&2
+          if ! grep -Fqx "  SERVICE_VERSION: \"${release_tag}\"" infra/k8s/configmap.yaml; then
+            echo "infra/k8s/configmap.yaml must set SERVICE_VERSION to '${release_tag}'." >&2
             exit 1
           fi
+
+          echo "tag=${release_tag}" >> "$GITHUB_OUTPUT"
 
   ci:
     name: Run CI
@@ -61,7 +79,7 @@ jobs:
     outputs:
       already_published: ${{ steps.check_tag.outputs.already_published }}
     env:
-      TAG: ${{ github.ref_name }}
+      TAG: ${{ needs.validate.outputs.tag }}
       DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
     steps:
       - name: Check out repository
@@ -81,6 +99,9 @@ jobs:
           case "$status" in
             200)
               echo "Image tag ${DOCKERHUB_USERNAME}/encontros-tech:${TAG} already exists; it will not be overwritten."
+              if [[ "$GITHUB_REF_TYPE" == branch ]]; then
+                echo "::warning::Image ${DOCKERHUB_USERNAME}/encontros-tech:${TAG} already exists; this merge will not publish a new image. Bump the manifest version to deploy changed code."
+              fi
               echo "already_published=true" >> "$GITHUB_OUTPUT"
               ;;
             404)
@@ -112,7 +133,7 @@ jobs:
         if: steps.check_tag.outputs.already_published == 'false'
         env:
           DOCKERHUB_USER: ${{ vars.DOCKERHUB_USERNAME }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.validate.outputs.tag }}
           COMMIT_SHA: ${{ github.sha }}
         run: >-
           docker buildx bake -f docker-bake.hcl --push
@@ -145,7 +166,7 @@ jobs:
         shell: bash
         run: |
           if ! secret_result="$(kubectl get secret encontros-tech-secret \
-            --namespace encuentros-tech --output name 2>&1)"; then
+            --namespace encontros-tech --output name 2>&1)"; then
             echo "Required Secret 'encontros-tech-secret' is missing or inaccessible in namespace 'encontros-tech'. Create it before releasing. Details: ${secret_result}" >&2
             exit 1
           fi
@@ -154,4 +175,4 @@ jobs:
         run: kubectl apply -f infra/k8s/
 
       - name: Wait for deployment rollout
-        run: kubectl rollout status deployment/encontros-tech --namespace encuentros-tech --timeout=5m
+        run: kubectl rollout status deployment/encontros-tech --namespace encontros-tech --timeout=5m

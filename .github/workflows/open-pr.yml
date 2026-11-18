@@ -1,0 +1,67 @@
+name: Open pull request
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  open-pr:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the tested branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Open a pull request when needed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          CI_RUN_URL: ${{ github.event.workflow_run.html_url }}
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          case "$BRANCH" in
+            feature/*|fix/*|docs/*) ;;
+            *)
+              echo "Branch '$BRANCH' is outside the configured PR prefixes; skipping."
+              exit 0
+              ;;
+          esac
+
+          open_pr="$(gh pr list --head "$BRANCH" --base main --state open --json number --jq 'length')"
+          if [[ "$open_pr" != 0 ]]; then
+            echo "An open pull request from '$BRANCH' to main already exists; skipping."
+            exit 0
+          fi
+
+          branch_sha="$(git ls-remote origin "refs/heads/$BRANCH" | awk 'NR == 1 {print $1}')"
+          if [[ "$branch_sha" != "$TESTED_SHA" ]]; then
+            echo "Branch '$BRANCH' has moved since CI ran; skipping this stale result."
+            exit 0
+          fi
+
+          git fetch origin main:refs/remotes/origin/main
+          ahead="$(git rev-list --count origin/main..HEAD)"
+          if [[ "$ahead" == 0 ]]; then
+            echo "Branch '$BRANCH' has no commits ahead of main; skipping."
+            exit 0
+          fi
+
+          gh pr create \
+            --head "$BRANCH" \
+            --base main \
+            --title "Merge $BRANCH into main" \
+            --body "CI passed: $CI_RUN_URL"
