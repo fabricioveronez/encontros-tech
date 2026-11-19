@@ -221,7 +221,6 @@ __marimo__/
 kubeconfig
 
 
-
 # Terraform
 .terraform/
 *.tfstate
@@ -229,3 +228,7 @@ kubeconfig
 *.tfvars
 *.tfvars.json
 crash.log
+!*.tfvars.example
+*.tfplan
+crash.log
+terraform/kubeconfig
