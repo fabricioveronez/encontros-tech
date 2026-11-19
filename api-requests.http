@@ -148,6 +148,21 @@ GET {{baseUrl}}/api/events/?search=Workshop
 ### Buscar eventos por localização
 GET {{baseUrl}}/api/events/?search=São Paulo
 
+### Filtrar por intervalo de datas (inclusivo nas duas pontas)
+GET {{baseUrl}}/api/events/?start_date=2024-02-20&end_date=2024-03-05
+
+### Filtrar só pela data de início
+GET {{baseUrl}}/api/events/?start_date=2024-03-10
+
+### Filtrar só pela data de fim
+GET {{baseUrl}}/api/events/?end_date=2024-02-25
+
+### Combinar busca por texto e intervalo de datas
+GET {{baseUrl}}/api/events/?search=Python&start_date=2024-03-01&end_date=2024-03-31
+
+### Intervalo invertido (retorna 400)
+GET {{baseUrl}}/api/events/?start_date=2024-03-31&end_date=2024-03-01
+
 ### ============================================
 ### DOCUMENTAÇÃO DA API
 ### ============================================

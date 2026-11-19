@@ -17,20 +17,40 @@ bp = Blueprint('pages', __name__)
 def list_events_page():
     logger.info("WEB - Acessando página de listagem de eventos")
     search = request.args.get('search', None)
+    start_date_str = request.args.get('start_date', '')
+    end_date_str = request.args.get('end_date', '')
+    filter_error = None
     
     try:
+        try:
+            start_date = event_service.parse_date_param(start_date_str)
+            end_date = event_service.parse_date_param(end_date_str)
+            if start_date and end_date and start_date > end_date:
+                raise ValueError("A data inicial não pode ser maior que a data final.")
+        except ValueError as e:
+            # Filtro de data inválido: mostra o aviso e lista sem o filtro de data
+            logger.warning(f"Filtro de data inválido: {str(e)}")
+            filter_error = str(e)
+            start_date = end_date = None
+        
         with get_db() as db:
-            events = event_service.get_events(db, search=search)
+            events = event_service.get_events(
+                db, search=search, start_date=start_date, end_date=end_date
+            )
             
             log_business_event(logger, "WEB_EVENTS_PAGE_VIEWED", {
                 "count": len(events),
                 "has_search": search is not None,
+                "has_date_filter": start_date is not None or end_date is not None,
                 "method": "WEB"
             })
             
             return render_template("events/list.html", 
                                  events=events,
                                  current_search=search,
+                                 current_start_date=start_date_str,
+                                 current_end_date=end_date_str,
+                                 filter_error=filter_error,
                                  server_name=socket.gethostname())
     except Exception as e:
         logger.error(f"Erro ao carregar página de eventos: {str(e)}")

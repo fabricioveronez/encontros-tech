@@ -154,3 +154,93 @@ def test_update_event():
     mock_db.refresh.assert_called_once_with(existing_event)
 
 # Teste get_technologies removido - funcionalidade não implementada
+
+
+# ---------- Filtro por intervalo de datas ----------
+
+def _filter_args(mock_db):
+    """Retorna os argumentos posicionais da única chamada a query.filter()."""
+    mock_query = mock_db.query.return_value
+    mock_query.filter.assert_called_once()
+    return mock_query.filter.call_args.args
+
+def test_get_events_with_start_date_only():
+    mock_db = MagicMock()
+
+    event_service.get_events(db=mock_db, start_date=datetime.date(2024, 3, 1))
+
+    conditions = _filter_args(mock_db)
+    assert len(conditions) == 1
+    assert conditions[0].right.value == datetime.datetime(2024, 3, 1, 0, 0)
+
+def test_get_events_with_end_date_only_is_inclusive():
+    mock_db = MagicMock()
+
+    event_service.get_events(db=mock_db, end_date=datetime.date(2024, 3, 5))
+
+    conditions = _filter_args(mock_db)
+    assert len(conditions) == 1
+    # Limite exclusivo no dia seguinte: inclui eventos de qualquer hora do dia 05/03
+    assert conditions[0].right.value == datetime.datetime(2024, 3, 6, 0, 0)
+
+def test_get_events_with_date_range():
+    mock_db = MagicMock()
+
+    event_service.get_events(
+        db=mock_db,
+        start_date=datetime.date(2024, 2, 20),
+        end_date=datetime.date(2024, 3, 5),
+    )
+
+    conditions = _filter_args(mock_db)
+    assert len(conditions) == 2
+
+def test_get_events_with_search_and_date_range():
+    mock_db = MagicMock()
+    mock_filter = mock_db.query.return_value.filter.return_value
+
+    event_service.get_events(
+        db=mock_db,
+        search="Python",
+        start_date=datetime.date(2024, 3, 1),
+        end_date=datetime.date(2024, 3, 31),
+    )
+
+    conditions = _filter_args(mock_db)
+    assert len(conditions) == 3
+    mock_filter.order_by.assert_called_once()
+
+def test_get_events_same_start_and_end_date_is_allowed():
+    mock_db = MagicMock()
+
+    event_service.get_events(
+        db=mock_db,
+        start_date=datetime.date(2024, 3, 5),
+        end_date=datetime.date(2024, 3, 5),
+    )
+
+    assert len(_filter_args(mock_db)) == 2
+
+def test_get_events_start_date_after_end_date_raises():
+    mock_db = MagicMock()
+
+    with pytest.raises(ValueError):
+        event_service.get_events(
+            db=mock_db,
+            start_date=datetime.date(2024, 3, 31),
+            end_date=datetime.date(2024, 3, 1),
+        )
+
+    mock_db.query.assert_not_called()
+
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_parse_date_param_empty_returns_none(value):
+    assert event_service.parse_date_param(value) is None
+
+def test_parse_date_param_valid():
+    assert event_service.parse_date_param("2024-03-05") == datetime.date(2024, 3, 5)
+
+@pytest.mark.parametrize("value", ["abc", "05/03/2024", "2024-13-01"])
+def test_parse_date_param_invalid_raises(value):
+    with pytest.raises(ValueError):
+        event_service.parse_date_param(value)

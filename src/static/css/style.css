@@ -444,7 +444,8 @@ body {
   
   .filters-section .col-md-5,
   .filters-section .col-md-4,
-  .filters-section .col-md-3 {
+  .filters-section .col-md-3,
+  .filters-section .col-md-2 {
     width: 100%;
     margin-bottom: var(--spacing-sm);
   }
