@@ -1,0 +1,87 @@
+# CD (ADR 011/013/014): aplica na homologação a versão publicada pela CI.
+# Disparado quando a CI termina na main (só segue com sucesso), ou manualmente com uma versão.
+name: CD
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Tag da imagem a aplicar (ex.: v42)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Um deploy por vez; o seguinte espera na fila sem cancelar o atual
+concurrency:
+  group: cd-hml
+  cancel-in-progress: false
+
+env:
+  NAMESPACE: encontros-tech
+  MANIFEST: k8s/encontros-tech.yaml
+
+jobs:
+  deploy:
+    name: Deploy na homologação
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || format('v{0}', github.event.workflow_run.run_number) }}
+    steps:
+      # Manifesto do mesmo commit que gerou a imagem
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+
+      - uses: azure/setup-kubectl@v5
+
+      - uses: azure/k8s-set-context@v5
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBECONFIG }}
+
+      - name: Garantir o namespace
+        run: kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+
+      # Cria ou substitui o Secret com a DATABASE_URL (ADR 014)
+      - uses: azure/k8s-create-secret@v6
+        with:
+          namespace: ${{ env.NAMESPACE }}
+          secret-type: generic
+          secret-name: encontros-tech-secrets
+          string-data: ${{ format('{{"DATABASE_URL":{0}}}', toJSON(secrets.DATABASE_URL)) }}
+
+      # Versão trocada só na cópia do runner, sem commit (ADR 013); a tag da imagem é trocada pelo k8s-deploy
+      - name: Aplicar a versão no manifesto
+        run: |
+          sed -i -E \
+            -e "s|(app\.kubernetes\.io/version: )\"[^\"]*\"|\1\"${VERSION}\"|" \
+            -e "s|(SERVICE_VERSION: )\"[^\"]*\"|\1\"${VERSION}\"|" \
+            "$MANIFEST"
+          grep -nE 'app\.kubernetes\.io/version|SERVICE_VERSION' "$MANIFEST"
+
+      - uses: azure/k8s-deploy@v7
+        with:
+          namespace: ${{ env.NAMESPACE }}
+          manifests: ${{ env.MANIFEST }}
+          images: ${{ vars.IMAGE_NAME }}:${{ env.VERSION }}
+          strategy: basic
+          timeout: 5m
+
+      - name: Resumo
+        if: always()
+        run: |
+          {
+            echo "### Deploy ${VERSION}"
+            echo '```'
+            kubectl -n "$NAMESPACE" get deploy,pods,svc -o wide
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
