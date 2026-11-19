@@ -36,6 +36,13 @@
       "skillPath": "plugins/devops/skills/kubernetes-practices/SKILL.md",
       "computedHash": "f7df35156684c58b25a10987c3ea4855b8891150df3db054d265383f4e1646e2"
     },
+    "pipeline-github-actions": {
+      "source": "fabricioveronez/harness-publico",
+      "commit": "38066eeb27d4e7bebd8435a2a300b112e598296d",
+      "sourceType": "github",
+      "skillPath": "plugins/devops/skills/pipeline-github-actions/SKILL.md",
+      "computedHash": "3618459c31354c1dad57bcb0f5650b15c471095ccb331637d730cd88f920bc68"
+    },
     "terraform-style-guide": {
       "source": "hashicorp/agent-skills",
       "commit": "5e30fa5c867ba6777c37e4206babfd08049c396f",
