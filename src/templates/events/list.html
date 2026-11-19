@@ -12,19 +12,36 @@
     <div class="filters-section card mb-4">
         <div class="card-body">
             <form method="get" class="row g-3">
-                <div class="col-md-8">
+                <div class="col-md-5">
                     <label for="search" class="form-label">Buscar eventos</label>
                     <input type="text" class="form-control" id="search" name="search" 
                            placeholder="Digite título, descrição ou local..." 
                            value="{{ current_search or '' }}">
                 </div>
-                <div class="col-md-4 d-flex align-items-end">
+                <div class="col-md-2">
+                    <label for="start_date" class="form-label">Data início</label>
+                    <input type="date" class="form-control" id="start_date" name="start_date"
+                           value="{{ current_start_date or '' }}">
+                </div>
+                <div class="col-md-2">
+                    <label for="end_date" class="form-label">Data fim</label>
+                    <input type="date" class="form-control" id="end_date" name="end_date"
+                           value="{{ current_end_date or '' }}">
+                </div>
+                <div class="col-md-3 d-flex align-items-end">
                     <button type="submit" class="btn-modern btn-secondary-modern me-2">Filtrar</button>
                     <a href="/" class="btn-modern btn-outline-modern">Limpar</a>
                 </div>
             </form>
         </div>
     </div>
+
+    <!-- Aviso de filtro inválido -->
+    {% if filter_error %}
+    <div class="alert alert-warning" role="alert">
+        {{ filter_error }} O filtro de data não foi aplicado.
+    </div>
+    {% endif %}
 
     <!-- Mensagem de sucesso -->
     {% if request.args.get('created') %}
@@ -64,7 +81,7 @@
     <div class="empty-state text-center py-5">
         <h5>Nenhum evento encontrado</h5>
         <p class="text-muted">
-            {% if current_search %}
+            {% if current_search or current_start_date or current_end_date %}
                 Tente ajustar os filtros de busca.
             {% else %}
                 Seja o primeiro a cadastrar um evento!

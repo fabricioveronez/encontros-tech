@@ -3,6 +3,7 @@ from sqlalchemy import or_
 from models.event import Event
 from schemas.event import EventCreate, EventUpdate
 from typing import List, Optional
+import datetime
 from core.logging import get_logger, log_database_operation, log_business_event
 
 logger = get_logger("event_service")
@@ -43,21 +44,57 @@ def create_event(db: Session, event: EventCreate):
         db.rollback()
         raise
 
-def get_events(db: Session, skip: int = 0, limit: int = 100, search: Optional[str] = None):
-    logger.debug(f"Buscando eventos: skip={skip}, limit={limit}, search={search}")
-    
+def parse_date_param(value: Optional[str]) -> Optional[datetime.date]:
+    """Converte um parâmetro de data (YYYY-MM-DD) em date; vazio ou None vira None.
+
+    Lança ValueError se o formato for inválido.
+    """
+    if value is None or not value.strip():
+        return None
+    try:
+        return datetime.date.fromisoformat(value.strip())
+    except ValueError:
+        raise ValueError(f"Data inválida: '{value}'. Use o formato AAAA-MM-DD.")
+
+def get_events(
+    db: Session,
+    skip: int = 0,
+    limit: int = 100,
+    search: Optional[str] = None,
+    start_date: Optional[datetime.date] = None,
+    end_date: Optional[datetime.date] = None,
+):
+    logger.debug(
+        f"Buscando eventos: skip={skip}, limit={limit}, search={search}, "
+        f"start_date={start_date}, end_date={end_date}"
+    )
+
+    if start_date and end_date and start_date > end_date:
+        raise ValueError("A data inicial não pode ser maior que a data final.")
+
     try:
         query = db.query(Event)
-        
+        conditions = []
+
         if search:
-            search_filter = or_(
+            conditions.append(or_(
                 Event.title.ilike(f"%{search}%"),
                 Event.description.ilike(f"%{search}%"),
                 Event.location.ilike(f"%{search}%")
-            )
-            query = query.filter(search_filter)
+            ))
             logger.debug(f"Aplicando filtro de busca: {search}")
-        
+
+        # Intervalo inclusivo por dia: [start_date 00:00, end_date + 1 dia 00:00)
+        if start_date:
+            conditions.append(Event.date >= datetime.datetime.combine(start_date, datetime.time.min))
+        if end_date:
+            conditions.append(Event.date < datetime.datetime.combine(end_date + datetime.timedelta(days=1), datetime.time.min))
+        if start_date or end_date:
+            logger.debug(f"Aplicando filtro de data: {start_date} até {end_date}")
+
+        if conditions:
+            query = query.filter(*conditions)
+
         query = query.order_by(Event.date)
         events = query.offset(skip).limit(limit).all()
         

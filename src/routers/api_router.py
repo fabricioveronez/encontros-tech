@@ -52,20 +52,32 @@ def read_events():
         skip = request.args.get('skip', 0, type=int)
         limit = request.args.get('limit', 100, type=int)
         search = request.args.get('search', None, type=str)
+        start_date = event_service.parse_date_param(request.args.get('start_date'))
+        end_date = event_service.parse_date_param(request.args.get('end_date'))
         
-        logger.debug(f"Parâmetros de busca: skip={skip}, limit={limit}, search={search}")
+        logger.debug(
+            f"Parâmetros de busca: skip={skip}, limit={limit}, search={search}, "
+            f"start_date={start_date}, end_date={end_date}"
+        )
         
         with get_db() as db:
-            events = event_service.get_events(db, skip=skip, limit=limit, search=search)
+            events = event_service.get_events(
+                db, skip=skip, limit=limit, search=search,
+                start_date=start_date, end_date=end_date
+            )
             
             log_business_event(logger, "API_EVENTS_LISTED", {
                 "count": len(events),
                 "has_search": search is not None,
+                "has_date_filter": start_date is not None or end_date is not None,
                 "method": "API"
             })
             
             return jsonify([_to_dict(event) for event in events])
             
+    except ValueError as e:
+        logger.warning(f"Parâmetros de filtro inválidos: {str(e)}")
+        abort(400, description=str(e))
     except Exception as e:
         logger.error(f"Erro ao listar eventos: {str(e)}")
         abort(500, description="Erro interno do servidor")
